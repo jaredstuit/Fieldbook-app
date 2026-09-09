@@ -13,6 +13,22 @@ type Props = {
   initialSoils?: Soil[];
 };
 
+function addBoundary(draw: MapboxDraw, geometry: any) {
+  if (!geometry || geometry.type !== "Polygon") return false;
+  draw.deleteAll();
+  draw.add({ type: "Feature", properties: {}, geometry });
+  return true;
+}
+
+function fitToBoundary(m: mapboxgl.Map, geometry: any) {
+  try {
+    const bounds = new mapboxgl.LngLatBounds();
+    const coords = geometry?.coordinates?.flat(2) || [];
+    coords.forEach((p: any) => Array.isArray(p) && p.length >= 2 && bounds.extend([p[0], p[1]]));
+    if (!bounds.isEmpty()) m.fitBounds(bounds, { padding: 55, maxZoom: 16 });
+  } catch {}
+}
+
 export default function FieldBoundaryMap({ fieldId, initialBoundary = null, initialAcres = null, initialSoils = [] }: Props) {
   const node = useRef<HTMLDivElement | null>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -34,33 +50,21 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
     });
     map.current = m;
     m.addControl(new mapboxgl.NavigationControl(), "top-left");
-    const draw = new MapboxDraw({ displayControlsDefault:false, controls:{ polygon:true, trash:true } });
+    const draw = new MapboxDraw({ displayControlsDefault: false, controls: { polygon: true, trash: true } });
     m.addControl(draw, "top-right");
 
-    m.on("load", () => {
-      if (initialBoundary) {
-        draw.add({ type:"Feature", properties:{}, geometry:initialBoundary });
-        try {
-          const bounds = new mapboxgl.LngLatBounds();
-          const coords = initialBoundary.coordinates?.flat(2) || [];
-          coords.forEach((p:any)=>Array.isArray(p) && p.length>=2 && bounds.extend([p[0],p[1]]));
-          if (!bounds.isEmpty()) m.fitBounds(bounds, { padding:55, maxZoom:16 });
-        } catch {}
-      }
-    });
-
-    const persist = async (geometry:any, calculatedAcres:number) => {
+    const persist = async (geometry: any, calculatedAcres: number) => {
       try {
         const res = await fetch(`/api/fields/${fieldId}/boundary`, {
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({geometry, acres:calculatedAcres})
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ geometry, acres: calculatedAcres })
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Could not save boundary.");
         setDirty(false);
         setStatus("Boundary saved.");
-      } catch (e:any) {
+      } catch (e: any) {
         setStatus(e?.message || "Could not save boundary.");
       }
     };
@@ -76,14 +80,41 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
       setStatus("Saving boundary…");
       void persist(feature.geometry, calculatedAcres);
     };
-    m.on("draw.create", update); m.on("draw.update", update); m.on("draw.delete", update);
+
+    m.on("draw.create", update);
+    m.on("draw.update", update);
+    m.on("draw.delete", update);
+
+    m.on("load", async () => {
+      // First render the server-provided boundary, if present.
+      if (initialBoundary && addBoundary(draw, initialBoundary)) {
+        setPolygon(initialBoundary);
+        fitToBoundary(m, initialBoundary);
+      }
+
+      // Then explicitly reload the saved geometry from Supabase through the API.
+      // This avoids RSC/GeoJSON serialization differences and always reflects the database.
+      try {
+        const res = await fetch(`/api/fields/${fieldId}/boundary`, { cache: "no-store" });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Could not load saved boundary.");
+        if (json.geometry && addBoundary(draw, json.geometry)) {
+          setPolygon(json.geometry);
+          fitToBoundary(m, json.geometry);
+          setStatus("Saved boundary loaded.");
+        }
+      } catch (e: any) {
+        setStatus(e?.message || "Could not load saved boundary.");
+      }
+    });
+
     return () => { m.remove(); map.current = null; };
-  }, [token, initialBoundary]);
+  }, [token, fieldId, initialBoundary]);
 
   async function saveBoundary() {
     if (!polygon || !acres) return;
     setStatus("Saving boundary…");
-    const res = await fetch(`/api/fields/${fieldId}/boundary`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({geometry:polygon, acres}) });
+    const res = await fetch(`/api/fields/${fieldId}/boundary`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ geometry: polygon, acres }) });
     const json = await res.json();
     if (!res.ok) { setStatus(json.error || "Could not save boundary."); return; }
     setDirty(false); setStatus("Boundary saved.");
@@ -92,12 +123,12 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
   async function lookupSoils() {
     if (!polygon || !acres) return;
     setStatus("Saving boundary and looking up USDA soil map units…");
-    const boundaryRes = await fetch(`/api/fields/${fieldId}/boundary`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({geometry:polygon, acres}) });
+    const boundaryRes = await fetch(`/api/fields/${fieldId}/boundary`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ geometry: polygon, acres }) });
     const boundaryJson = await boundaryRes.json();
     if (!boundaryRes.ok) { setStatus(boundaryJson.error || "Could not save boundary."); return; }
     setDirty(false);
     setSoils([]);
-    const res = await fetch(`/api/fields/${fieldId}/soils`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({geometry:polygon}) });
+    const res = await fetch(`/api/fields/${fieldId}/soils`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ geometry: polygon }) });
     const json = await res.json();
     if (!res.ok) { setStatus(json.error || "Soil lookup failed."); return; }
     setSoils(json.soils || []);
