@@ -1,0 +1,3 @@
+
+# User-specific local environment. Do not commit .env.local to git.
+.env.local
