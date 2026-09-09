@@ -49,13 +49,32 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
       }
     });
 
+    const persist = async (geometry:any, calculatedAcres:number) => {
+      try {
+        const res = await fetch(`/api/fields/${fieldId}/boundary`, {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({geometry, acres:calculatedAcres})
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Could not save boundary.");
+        setDirty(false);
+        setStatus("Boundary saved.");
+      } catch (e:any) {
+        setStatus(e?.message || "Could not save boundary.");
+      }
+    };
+
     const update = () => {
       const fc = draw.getAll();
       const feature = fc.features[0] as any;
       if (!feature) { setPolygon(null); setAcres(null); setSoils([]); setDirty(true); return; }
+      const calculatedAcres = area(feature as any) * 0.000247105381;
       setPolygon(feature.geometry);
-      setAcres(area(feature as any) * 0.000247105381);
+      setAcres(calculatedAcres);
       setDirty(true);
+      setStatus("Saving boundary…");
+      void persist(feature.geometry, calculatedAcres);
     };
     m.on("draw.create", update); m.on("draw.update", update); m.on("draw.delete", update);
     return () => { m.remove(); map.current = null; };
@@ -71,8 +90,12 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
   }
 
   async function lookupSoils() {
-    if (!polygon) return;
-    setStatus("Looking up USDA soil map units…");
+    if (!polygon || !acres) return;
+    setStatus("Saving boundary and looking up USDA soil map units…");
+    const boundaryRes = await fetch(`/api/fields/${fieldId}/boundary`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({geometry:polygon, acres}) });
+    const boundaryJson = await boundaryRes.json();
+    if (!boundaryRes.ok) { setStatus(boundaryJson.error || "Could not save boundary."); return; }
+    setDirty(false);
     setSoils([]);
     const res = await fetch(`/api/fields/${fieldId}/soils`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({geometry:polygon}) });
     const json = await res.json();
@@ -86,7 +109,7 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
   return <div><div ref={node} className="real-map" />
     <div className="map-tools">
       <div><span className="label">Calculated area</span><div className="value">{acres ? `${acres.toFixed(2)} acres` : "Draw a field boundary"}</div></div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn secondary" disabled={!polygon || !dirty} onClick={saveBoundary}>Save boundary</button><button className="btn" disabled={!polygon} onClick={lookupSoils}>Get USDA soils</button></div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn secondary" disabled={!polygon || !dirty} onClick={saveBoundary}>Save boundary</button><button className="btn" disabled={!polygon} onClick={lookupSoils}>Save & get USDA soils</button></div>
     </div>
     {status?<p className="subtle" style={{fontSize:13}}>{status}</p>:null}
     {soils.length?<table className="table"><thead><tr><th>Symbol</th><th>Soil map unit</th><th>Acres</th><th>Field %</th></tr></thead><tbody>{soils.map(s=><tr key={s.mukey}><td>{s.symbol}</td><td>{s.name}</td><td>{s.acres.toFixed(2)}</td><td>{s.percent.toFixed(1)}%</td></tr>)}</tbody></table>:null}
