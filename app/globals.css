@@ -166,3 +166,8 @@ select { font: inherit; color: var(--ink); }
   .result-grid > :nth-child(3){grid-column:1}
   .result-grid > :nth-child(4){grid-column:2}
 }
+
+/* v0.6.5 usability */
+.form-card select { width:100%; min-height:44px; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--card); color:inherit; font:inherit; }
+.text-link { font-size:13px; font-weight:700; }
+.record-actions { margin-top:8px; }

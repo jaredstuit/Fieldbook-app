@@ -14,8 +14,8 @@ const starters = [
   { analyte: "Zinc", unit: "ppm" }
 ];
 
-export default function SampleResultRows() {
-  const [rows, setRows] = useState<Row[]>([
+export default function SampleResultRows({initialRows=[]}:{initialRows?:Array<{analyte:string;value?:string|number|null;unit?:string|null;qualifier?:string|null}>}) {
+  const [rows, setRows] = useState<Row[]>(initialRows.length ? initialRows.map((r,i)=>({id:i+1,analyte:r.analyte||"",value:r.value==null?"":String(r.value),unit:r.unit||"",qualifier:r.qualifier||""})) : [
     { id: 1, analyte: "", value: "", unit: "", qualifier: "" },
     { id: 2, analyte: "", value: "", unit: "", qualifier: "" },
     { id: 3, analyte: "", value: "", unit: "", qualifier: "" }
