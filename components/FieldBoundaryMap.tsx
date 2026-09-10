@@ -20,13 +20,20 @@ function addBoundary(draw: MapboxDraw, geometry: any) {
   return true;
 }
 
-function fitToBoundary(m: mapboxgl.Map, geometry: any) {
+function boundsFromGeometry(geometry: any): mapboxgl.LngLatBounds | null {
   try {
     const bounds = new mapboxgl.LngLatBounds();
     const coords = geometry?.coordinates?.flat(2) || [];
     coords.forEach((p: any) => Array.isArray(p) && p.length >= 2 && bounds.extend([p[0], p[1]]));
-    if (!bounds.isEmpty()) m.fitBounds(bounds, { padding: 55, maxZoom: 16 });
-  } catch {}
+    return bounds.isEmpty() ? null : bounds;
+  } catch {
+    return null;
+  }
+}
+
+function fitToBoundary(m: mapboxgl.Map, geometry: any) {
+  const bounds = boundsFromGeometry(geometry);
+  if (bounds) { m.resize(); m.fitBounds(bounds, { padding: 55, maxZoom: 16 }); }
 }
 
 export default function FieldBoundaryMap({ fieldId, initialBoundary = null, initialAcres = null, initialSoils = [] }: Props) {
@@ -42,11 +49,13 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
   useEffect(() => {
     if (!node.current || !token || map.current) return;
     mapboxgl.accessToken = token;
+    const initialBounds = initialBoundary && initialBoundary.type === "Polygon" ? boundsFromGeometry(initialBoundary) : null;
     const m = new mapboxgl.Map({
       container: node.current,
       style: "mapbox://styles/mapbox/standard-satellite",
-      center: [-121.124, 37.741],
-      zoom: 11
+      ...(initialBounds
+        ? { bounds: initialBounds, fitBoundsOptions: { padding: 55, maxZoom: 16 } }
+        : { center: [-121.124, 37.741], zoom: 11 })
     });
     map.current = m;
     m.addControl(new mapboxgl.NavigationControl(), "top-left");
@@ -97,6 +106,7 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
       try {
         const res = await fetch(`/api/fields/${fieldId}/boundary`, { cache: "no-store" });
         const json = await res.json();
+        if (map.current !== m) return;
         if (!res.ok) throw new Error(json.error || "Could not load saved boundary.");
         if (json.geometry && addBoundary(draw, json.geometry)) {
           setPolygon(json.geometry);
