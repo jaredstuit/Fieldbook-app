@@ -15,29 +15,52 @@ const VALUE_PATTERN = new RegExp(`([<>])?\\s*(\\d[\\d,]*\\.?\\d*)\\s*(${UNIT_TOK
 const RANGE_PATTERN = /(?:normal|range|reference|sufficien\w*)?\s*[:(]?\s*(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*\)?/i;
 const GENERIC_ROW_PATTERN = /^([A-Za-z][A-Za-z\-\s]{1,40}?)[:\s]+([<>]?\s*\d[\d,]*\.?\d*)\s*([%A-Za-z/]{0,15})?/;
 
+// Some PDF generators (chart/form-heavy reports especially) emit text runs
+// in an order that has nothing to do with the visual layout -- hasEOL-based
+// reconstruction assumes reading order and silently produces garbage on
+// those documents. Reconstruct by actual position instead: cluster items
+// into visual rows by y-proximity, then order each row left to right by x.
 function reconstructLines(items: StructuredTextItem[]): string[] {
-  const lines: string[] = [];
-  let current: { text: string; lastX: number; lastWidth: number; fontSize: number } | null = null;
+  const withText = items.filter((it) => it.str.trim().length > 0);
+  if (withText.length === 0) return [];
 
-  for (const item of items) {
-    const str = item.str;
-    if (current === null) {
-      current = { text: str, lastX: item.x, lastWidth: item.width, fontSize: item.fontSize || 10 };
-    } else {
+  const sorted = [...withText].sort((a, b) => {
+    const tolerance = Math.max(a.fontSize, b.fontSize, 1) * 0.6;
+    if (Math.abs(a.y - b.y) > tolerance) return b.y - a.y; // higher y = higher on the page = earlier
+    return a.x - b.x;
+  });
+
+  const lines: string[] = [];
+  let current: { text: string; y: number; lastX: number; lastWidth: number; fontSize: number } | null = null;
+
+  for (const item of sorted) {
+    const tolerance = Math.max(item.fontSize, current?.fontSize || item.fontSize, 1) * 0.6;
+    if (current && Math.abs(item.y - current.y) <= tolerance) {
       const gap = item.x - (current.lastX + current.lastWidth);
       const separator = gap > current.fontSize * 1.2 ? "   " : gap > 1 ? " " : "";
-      current.text += separator + str;
+      current.text += separator + item.str;
       current.lastX = item.x;
       current.lastWidth = item.width;
-    }
-    if (item.hasEOL) {
-      lines.push(current.text.replace(/\s+/g, " ").trim());
-      current = null;
+    } else {
+      if (current) lines.push(current.text.replace(/\s+/g, " ").trim());
+      current = { text: item.str, y: item.y, lastX: item.x, lastWidth: item.width, fontSize: item.fontSize || 10 };
     }
   }
   if (current) lines.push(current.text.replace(/\s+/g, " ").trim());
 
   return lines.filter((l) => l.length > 0);
+}
+
+const RECOMMENDATION_PAGE_SIGNALS = [/lbs\s*\/\s*ac/i, /nutrients?\s+required/i, /ideal\s+level/i, /fertilizer\s+equivalents/i, /crop\s+removal/i];
+
+// Fertilizer/nutrient-recommendation pages (lbs/acre needed) reuse the exact
+// same analyte names (Nitrogen, Phosphorus, ...) as a totally different kind
+// of number -- a recommended application rate, not a measured lab result.
+// Extracting those as if they were sample_results would be flatly wrong, not
+// just noisy, so skip such pages entirely rather than risk it.
+function looksLikeRecommendationPage(lines: string[]): boolean {
+  const text = lines.join(" ");
+  return RECOMMENDATION_PAGE_SIGNALS.filter((p) => p.test(text)).length >= 2;
 }
 
 function isNonDataLine(line: string): boolean {
@@ -119,6 +142,11 @@ export async function parsePdfLabReport(buffer: ArrayBuffer, sampleType: SampleT
 
   for (const pageItems of items) {
     const lines = reconstructLines(pageItems);
+
+    if (looksLikeRecommendationPage(lines)) {
+      warnings.push("Skipped a page that looks like a fertilizer/nutrient recommendation table (lbs/acre needed), not lab results — those aren't sample values.");
+      continue;
+    }
 
     const transposed = parseTransposedTable(lines, sampleType);
     if (transposed) {
