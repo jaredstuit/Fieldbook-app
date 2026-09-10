@@ -1,6 +1,6 @@
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
-import SortableTable from "@/components/SortableTable";
+import GrowersTable from "@/components/GrowersTable";
 import { getCurrentOrganization } from "@/lib/org";
 import { growers as demoGrowers } from "@/lib/demo-data";
 
@@ -32,16 +32,6 @@ export default async function Home() {
 
   return <AppShell><div className="topbar"><div><h1>Growers</h1><p className="subtle">{organization.name} · live database</p></div><Link className="btn" href="/growers/new">+ Grower</Link></div>
     <div className="grid grid-4" style={{marginBottom:18}}><div className="card stat"><strong>{rows.length}</strong><span>Growers</span></div><div className="card stat"><strong>{totalRanches}</strong><span>Ranches</span></div><div className="card stat"><strong>{totalFields}</strong><span>Fields</span></div><div className="card stat"><strong>{totalAcres.toFixed(1)}</strong><span>Total acres</span></div></div>
-    <div className="card">{rows.length?<SortableTable
-      rows={rows}
-      rowKey={(g:any)=>g.id}
-      defaultSortKey="name"
-      columns={[
-        { key:"name", label:"Grower", accessor:(g:any)=>g.name, render:(g:any)=><Link href={`/growers/${g.id}`}><strong>{g.name}</strong></Link> },
-        { key:"ranchCount", label:"Ranches", accessor:(g:any)=>g.ranchCount },
-        { key:"fieldCount", label:"Fields", accessor:(g:any)=>g.fieldCount },
-        { key:"acres", label:"Acres", accessor:(g:any)=>g.acres, render:(g:any)=>g.acres.toFixed(1) }
-      ]}
-    />:<div className="empty"><h3>No growers yet</h3><p className="subtle">Create your first grower, then add ranches and fields beneath it.</p><Link className="btn" href="/growers/new">Create first grower</Link></div>}</div>
+    <div className="card">{rows.length?<GrowersTable rows={rows}/>:<div className="empty"><h3>No growers yet</h3><p className="subtle">Create your first grower, then add ranches and fields beneath it.</p><Link className="btn" href="/growers/new">Create first grower</Link></div>}</div>
   </AppShell>;
 }
