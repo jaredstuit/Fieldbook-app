@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentOrganization } from "@/lib/org";
+import { uploadSourceDocument } from "@/lib/storage";
+import { parseLabReportFile, type ParseResult, type SampleType } from "@/lib/lab-report-parsing";
+
+const MAX_LAB_REPORT_BYTES = 15 * 1024 * 1024;
 
 function text(formData: FormData, key: string) {
   const value = String(formData.get(key) || "").trim();
@@ -142,6 +146,18 @@ export async function createObservation(formData: FormData) {
   redirect(`/fields/${fieldId}/timeline`);
 }
 
+export async function parseLabReport(formData: FormData): Promise<ParseResult> {
+  const { organization } = await getCurrentOrganization();
+  if (!organization) throw new Error("You must be signed in.");
+
+  const file = formData.get("file") as File | null;
+  const sampleType = (String(formData.get("sample_type") || "tissue")) as SampleType;
+  if (!file || file.size === 0) throw new Error("Choose a file first.");
+  if (file.size > MAX_LAB_REPORT_BYTES) throw new Error("File is too large (max 15MB).");
+
+  return parseLabReportFile(file, sampleType);
+}
+
 export async function createSample(formData: FormData) {
   const { supabase, organization } = await getCurrentOrganization();
   if (!organization) throw new Error("No organization membership found for this account.");
@@ -150,6 +166,13 @@ export async function createSample(formData: FormData) {
   const sampledAt = text(formData, "sampled_at");
   if (!fieldId || !sampleType || !sampledAt) throw new Error("Field, sample type, and sample date are required.");
 
+  let sourceDocumentPath: string | null = null;
+  const sourceFile = formData.get("source_file") as File | null;
+  if (sourceFile && sourceFile.size > 0) {
+    if (sourceFile.size > MAX_LAB_REPORT_BYTES) throw new Error("Lab report file is too large (max 15MB).");
+    sourceDocumentPath = await uploadSourceDocument(supabase, organization.id, sourceFile);
+  }
+
   const { data: sample, error } = await supabase.from("samples").insert({
     organization_id: organization.id,
     field_id: fieldId,
@@ -157,6 +180,7 @@ export async function createSample(formData: FormData) {
     sampled_at: sampledAt,
     lab_name: text(formData, "lab_name"),
     sample_label: text(formData, "sample_label"),
+    source_document_path: sourceDocumentPath,
     notes: text(formData, "notes")
   }).select("id").single();
   if (error) throw error;
@@ -165,6 +189,7 @@ export async function createSample(formData: FormData) {
   const values = formData.getAll("result_value").map(v => String(v).trim());
   const units = formData.getAll("unit").map(v => String(v).trim());
   const qualifiers = formData.getAll("qualifier").map(v => String(v).trim());
+  const labRanges = formData.getAll("lab_reference_range").map(v => String(v).trim());
 
   const results: Array<{
     sample_id: string;
@@ -173,6 +198,7 @@ export async function createSample(formData: FormData) {
     text_value: string | null;
     unit: string | null;
     qualifier: string | null;
+    lab_reference_range: string | null;
   }> = [];
 
   for (let i = 0; i < analytes.length; i++) {
@@ -186,7 +212,8 @@ export async function createSample(formData: FormData) {
       value: parsed !== null && Number.isFinite(parsed) ? parsed : null,
       text_value: parsed === null || Number.isFinite(parsed) ? null : rawValue,
       unit: units[i] || null,
-      qualifier: qualifiers[i] || null
+      qualifier: qualifiers[i] || null,
+      lab_reference_range: labRanges[i] || null
     });
   }
 
@@ -220,5 +247,71 @@ export async function updateObservation(formData: FormData) {
  const {supabase}=await getCurrentOrganization();const id=text(formData,"observation_id"),fieldId=text(formData,"field_id"),note=text(formData,"note"),observed=text(formData,"observed_at");if(!id||!fieldId||!note)throw new Error("Missing observation information.");const {error}=await supabase.from("observations").update({note,observation_type:text(formData,"observation_type")||"Field observation",rating:numberOrNull(formData.get("rating")),...(observed?{observed_at:pacificLocalToIso(observed)}:{})}).eq("id",id);if(error)throw error;revalidatePath(`/fields/${fieldId}/notes`);redirect(`/fields/${fieldId}/notes`);
 }
 export async function updateSample(formData: FormData) {
- const {supabase}=await getCurrentOrganization();const id=text(formData,"sample_id"),fieldId=text(formData,"field_id"),sampleType=text(formData,"sample_type"),sampledAt=text(formData,"sampled_at");if(!id||!fieldId||!sampleType||!sampledAt)throw new Error("Missing sample information.");let {error}=await supabase.from("samples").update({sample_type:sampleType,sampled_at:sampledAt,lab_name:text(formData,"lab_name"),sample_label:text(formData,"sample_label"),notes:text(formData,"notes")}).eq("id",id);if(error)throw error;error=(await supabase.from("sample_results").delete().eq("sample_id",id)).error;if(error)throw error;const analytes=formData.getAll("analyte").map(v=>String(v).trim()),values=formData.getAll("result_value").map(v=>String(v).trim()),units=formData.getAll("unit").map(v=>String(v).trim()),qualifiers=formData.getAll("qualifier").map(v=>String(v).trim());const rows:any[]=[];for(let i=0;i<analytes.length;i++){if(!analytes[i])continue;const raw=values[i]||"",num=raw===""?null:Number(raw);rows.push({sample_id:id,analyte:analytes[i],value:num!==null&&Number.isFinite(num)?num:null,text_value:num===null||Number.isFinite(num)?null:raw,unit:units[i]||null,qualifier:qualifiers[i]||null});}if(rows.length){const r=await supabase.from("sample_results").insert(rows);if(r.error)throw r.error;}revalidatePath(`/fields/${fieldId}/samples`);revalidatePath('/samples');redirect(`/fields/${fieldId}/samples`);
+  const { supabase, organization } = await getCurrentOrganization();
+  if (!organization) throw new Error("You must be signed in.");
+  const id = text(formData, "sample_id");
+  const fieldId = text(formData, "field_id");
+  const sampleType = text(formData, "sample_type");
+  const sampledAt = text(formData, "sampled_at");
+  if (!id || !fieldId || !sampleType || !sampledAt) throw new Error("Missing sample information.");
+
+  const updatePayload: Record<string, unknown> = {
+    sample_type: sampleType,
+    sampled_at: sampledAt,
+    lab_name: text(formData, "lab_name"),
+    sample_label: text(formData, "sample_label"),
+    notes: text(formData, "notes")
+  };
+
+  const sourceFile = formData.get("source_file") as File | null;
+  if (sourceFile && sourceFile.size > 0) {
+    if (sourceFile.size > MAX_LAB_REPORT_BYTES) throw new Error("Lab report file is too large (max 15MB).");
+    updatePayload.source_document_path = await uploadSourceDocument(supabase, organization.id, sourceFile);
+  }
+
+  let { error } = await supabase.from("samples").update(updatePayload).eq("id", id);
+  if (error) throw error;
+
+  error = (await supabase.from("sample_results").delete().eq("sample_id", id)).error;
+  if (error) throw error;
+
+  const analytes = formData.getAll("analyte").map(v => String(v).trim());
+  const values = formData.getAll("result_value").map(v => String(v).trim());
+  const units = formData.getAll("unit").map(v => String(v).trim());
+  const qualifiers = formData.getAll("qualifier").map(v => String(v).trim());
+  const labRanges = formData.getAll("lab_reference_range").map(v => String(v).trim());
+
+  const rows: Array<{
+    sample_id: string;
+    analyte: string;
+    value: number | null;
+    text_value: string | null;
+    unit: string | null;
+    qualifier: string | null;
+    lab_reference_range: string | null;
+  }> = [];
+
+  for (let i = 0; i < analytes.length; i++) {
+    if (!analytes[i]) continue;
+    const raw = values[i] || "";
+    const num = raw === "" ? null : Number(raw);
+    rows.push({
+      sample_id: id,
+      analyte: analytes[i],
+      value: num !== null && Number.isFinite(num) ? num : null,
+      text_value: num === null || Number.isFinite(num) ? null : raw,
+      unit: units[i] || null,
+      qualifier: qualifiers[i] || null,
+      lab_reference_range: labRanges[i] || null
+    });
+  }
+
+  if (rows.length) {
+    const r = await supabase.from("sample_results").insert(rows);
+    if (r.error) throw r.error;
+  }
+
+  revalidatePath(`/fields/${fieldId}/samples`);
+  revalidatePath("/samples");
+  redirect(`/fields/${fieldId}/samples`);
 }

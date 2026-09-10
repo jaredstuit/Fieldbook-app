@@ -8,21 +8,23 @@
     "start": "next start"
   },
   "dependencies": {
+    "@mapbox/mapbox-gl-draw": "^1.5.1",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.57.4",
+    "@turf/area": "^7.2.0",
     "lucide-react": "^0.468.0",
+    "mapbox-gl": "^3.30.0",
     "next": "16.3.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "@mapbox/mapbox-gl-draw": "^1.5.1",
-    "@turf/area": "^7.2.0",
-    "mapbox-gl": "^3.30.0"
+    "unpdf": "^1.8.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-latest/xlsx-latest.tgz"
   },
   "devDependencies": {
+    "@types/mapbox__mapbox-gl-draw": "^1.4.9",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
-    "typescript": "^5.7.2",
-    "@types/mapbox__mapbox-gl-draw": "^1.4.9"
+    "typescript": "^5.7.2"
   }
 }
