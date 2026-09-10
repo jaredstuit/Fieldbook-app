@@ -11,13 +11,13 @@ export default function AppShell({ children, active = "Growers" }: { children: R
   ];
   return <div className="shell">
     <aside className="sidebar">
-      <div className="brand">Fieldbook<small>PRIVATE AGRONOMY</small></div>
+      <Link href="/" className="brand">Fieldbook<small>PRIVATE AGRONOMY</small></Link>
       <nav className="nav">
         {items.map(item => item.href === "#"
           ? <span key={item.label} className={active===item.label?"active":""} style={{display:"block",padding:"11px 12px",opacity:.5}}>{item.label}</span>
           : <Link key={item.label} className={active===item.label?"active":""} href={item.href}>{item.label}</Link>)}
       </nav>
-      <form action={logout} style={{marginTop:28}}><button className="sidebar-logout" type="submit">Sign out</button></form>
+      <form action={logout} className="sidebar-logout-form"><button className="sidebar-logout" type="submit">Sign out</button></form>
     </aside>
     <main className="main">{children}</main>
   </div>;
