@@ -22,7 +22,8 @@ export const ANALYTE_DICTIONARY: Record<SampleType, AnalyteAlias[]> = {
     { canonical: "Manganese", unit: "ppm", aliases: ["mn", "manganese"] },
     { canonical: "Iron", unit: "ppm", aliases: ["fe", "iron"] },
     { canonical: "Copper", unit: "ppm", aliases: ["cu", "copper"] },
-    { canonical: "Molybdenum", unit: "ppm", aliases: ["mo", "molybdenum"] }
+    { canonical: "Molybdenum", unit: "ppm", aliases: ["mo", "molybdenum"] },
+    { canonical: "Aluminum", unit: "ppm", aliases: ["al", "aluminum", "aluminium"] }
   ],
   soil: [
     { canonical: "pH", unit: "", aliases: ["ph", "soil ph"] },

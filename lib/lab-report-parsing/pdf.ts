@@ -52,6 +52,64 @@ function extractRange(remainder: string): string | null {
   return `${match[1]}-${match[2]}`;
 }
 
+const UNIT_TOKEN_PATTERN = /^(%|ppm|ds\/m|meq\/100g|meq\/l|mg\/l|mg\/kg|-|—)?$/i;
+
+// Some lab reports (e.g. bar-chart style summaries) lay results out as a
+// table with analytes across the top as column headers, and separate rows
+// underneath for units, test results, and a normal-range low/high pair --
+// rather than one "analyte: value" line per analyte. Detect that shape
+// directly: a header row where every token is a recognized analyte alias,
+// optionally followed by a units row, then 1-3 rows of matching-length
+// numeric data (test results, then range low/high).
+function parseTransposedTable(lines: string[], sampleType: SampleType): ExtractedRow[] | null {
+  for (let i = 0; i < lines.length; i++) {
+    const headerTokens = lines[i].split(/\s+/).filter(Boolean);
+    if (headerTokens.length < 3) continue;
+
+    const matches = headerTokens.map((t) => matchAnalyte(sampleType, t));
+    if (matches.some((m) => !m || m.confidence !== "high")) continue;
+    const canonicals = matches.map((m) => m!.canonical);
+    if (new Set(canonicals).size !== canonicals.length) continue; // header must be distinct analytes, not a data row
+
+    const width = headerTokens.length;
+    let unitTokens: string[] | null = null;
+    const numericRows: number[][] = [];
+
+    for (let j = i + 1; j < Math.min(lines.length, i + 16) && numericRows.length < 3; j++) {
+      const tokens = lines[j].split(/\s+/).filter(Boolean);
+      if (tokens.length !== width) continue;
+
+      if (!unitTokens && tokens.every((t) => UNIT_TOKEN_PATTERN.test(t))) {
+        unitTokens = tokens;
+        continue;
+      }
+
+      const numbers = tokens.map((t) => Number(t.replace(/,/g, "")));
+      if (numbers.every((n) => Number.isFinite(n))) {
+        numericRows.push(numbers);
+      }
+    }
+
+    if (numericRows.length === 0) continue;
+
+    const results = numericRows[0];
+    const rangeLow = numericRows[1];
+    const rangeHigh = numericRows[2];
+
+    return canonicals.map((canonical, idx) => ({
+      analyte: canonical,
+      value: results[idx],
+      textValue: null,
+      unit: unitTokens?.[idx] || null,
+      qualifier: null,
+      labReferenceRange: rangeLow && rangeHigh ? `${rangeLow[idx]}-${rangeHigh[idx]}` : null,
+      confidence: "high" as const
+    }));
+  }
+
+  return null;
+}
+
 export async function parsePdfLabReport(buffer: ArrayBuffer, sampleType: SampleType): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(buffer));
   const { items } = await extractTextItems(pdf);
@@ -61,6 +119,12 @@ export async function parsePdfLabReport(buffer: ArrayBuffer, sampleType: SampleT
 
   for (const pageItems of items) {
     const lines = reconstructLines(pageItems);
+
+    const transposed = parseTransposedTable(lines, sampleType);
+    if (transposed) {
+      rows.push(...transposed);
+      continue;
+    }
 
     for (const line of lines) {
       if (isNonDataLine(line)) continue;
