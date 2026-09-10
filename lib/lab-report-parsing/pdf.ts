@@ -53,6 +53,30 @@ function reconstructLines(items: StructuredTextItem[]): string[] {
 
 const RECOMMENDATION_PAGE_SIGNALS = [/lbs\s*\/\s*ac/i, /nutrients?\s+required/i, /ideal\s+level/i, /fertilizer\s+equivalents/i, /crop\s+removal/i];
 
+const SOIL_SECTION_START = /traditional\s+soil\s+tests/i;
+const SOIL_SECTION_END = [/water\s+extraction\s+test/i, /soil\s+salinity.{0,30}sodicity/i, /nutrients?\s+required/i];
+
+// Soil reports commonly repeat the same analyte name under multiple test
+// methods (e.g. a "Traditional" ppm reading vs. a "Water Extraction"
+// availability reading) with very different values on very different
+// scales. Rather than merge those into ambiguous duplicate rows, scope
+// extraction to the "Traditional Soil Tests" section specifically when
+// that heading is present -- the standard panel most commonly referenced.
+// Pages/reports without that heading fall back to full-page parsing.
+function restrictToTraditionalSoilSection(lines: string[]): string[] {
+  const startIdx = lines.findIndex((l) => SOIL_SECTION_START.test(l));
+  if (startIdx === -1) return lines;
+
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (SOIL_SECTION_END.some((p) => p.test(lines[i]))) {
+      endIdx = i;
+      break;
+    }
+  }
+  return lines.slice(startIdx, endIdx);
+}
+
 // Fertilizer/nutrient-recommendation pages (lbs/acre needed) reuse the exact
 // same analyte names (Nitrogen, Phosphorus, ...) as a totally different kind
 // of number -- a recommended application rate, not a measured lab result.
@@ -141,11 +165,19 @@ export async function parsePdfLabReport(buffer: ArrayBuffer, sampleType: SampleT
   const warnings: string[] = [];
 
   for (const pageItems of items) {
-    const lines = reconstructLines(pageItems);
+    let lines = reconstructLines(pageItems);
 
     if (looksLikeRecommendationPage(lines)) {
       warnings.push("Skipped a page that looks like a fertilizer/nutrient recommendation table (lbs/acre needed), not lab results — those aren't sample values.");
       continue;
+    }
+
+    if (sampleType === "soil") {
+      const scoped = restrictToTraditionalSoilSection(lines);
+      if (scoped.length !== lines.length) {
+        warnings.push("Only imported the \"Traditional Soil Tests\" section — other sections (e.g. Water Extraction, Salinity/Sodicity) use different test methods and weren't auto-imported to avoid mixing up values with the same analyte name.");
+      }
+      lines = scoped;
     }
 
     const transposed = parseTransposedTable(lines, sampleType);
