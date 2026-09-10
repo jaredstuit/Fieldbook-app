@@ -246,6 +246,20 @@ export async function updateFieldNote(formData: FormData) {
 export async function updateObservation(formData: FormData) {
  const {supabase}=await getCurrentOrganization();const id=text(formData,"observation_id"),fieldId=text(formData,"field_id"),note=text(formData,"note"),observed=text(formData,"observed_at");if(!id||!fieldId||!note)throw new Error("Missing observation information.");const {error}=await supabase.from("observations").update({note,observation_type:text(formData,"observation_type")||"Field observation",rating:numberOrNull(formData.get("rating")),...(observed?{observed_at:pacificLocalToIso(observed)}:{})}).eq("id",id);if(error)throw error;revalidatePath(`/fields/${fieldId}/notes`);redirect(`/fields/${fieldId}/notes`);
 }
+export async function deleteSample(formData: FormData) {
+  const { supabase } = await getCurrentOrganization();
+  const id = text(formData, "sample_id");
+  const fieldId = text(formData, "field_id");
+  if (!id || !fieldId) throw new Error("Missing sample information.");
+
+  const { error } = await supabase.from("samples").delete().eq("id", id);
+  if (error) throw error;
+
+  revalidatePath(`/fields/${fieldId}/samples`);
+  revalidatePath("/samples");
+  redirect(`/fields/${fieldId}/samples`);
+}
+
 export async function updateSample(formData: FormData) {
   const { supabase, organization } = await getCurrentOrganization();
   if (!organization) throw new Error("You must be signed in.");

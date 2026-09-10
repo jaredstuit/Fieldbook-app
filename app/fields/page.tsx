@@ -9,7 +9,7 @@ export default async function FieldsPage() {
   const rows=(data||[]).map((f:any)=>{
     const r=Array.isArray(f.ranches)?f.ranches[0]:f.ranches;
     const g=Array.isArray(r?.growers)?r.growers[0]:r?.growers;
-    return { ...f, growerName:g?.name||null, ranchName:r?.name||null, cropLabel:[f.variety,f.current_crop].filter(Boolean).join(" ")||null, acres:f.acres?Number(f.acres):null };
+    return { ...f, growerName:g?.name||null, ranchName:r?.name||null, crop:f.current_crop||null, variety:f.variety||null, acres:f.acres?Number(f.acres):null };
   });
   return <AppShell active="Fields"><div className="topbar"><div><h1>Fields</h1><p className="subtle">All mapped and unmapped blocks in {organization.name}.</p></div></div>
     <div className="card">{rows.length?<FieldsTable rows={rows}/>:<p className="subtle">No fields yet.</p>}</div>

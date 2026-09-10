@@ -54,6 +54,8 @@ h1 { font-size:30px; margin-bottom:5px; }
   border:0; border-radius:9px; padding:10px 14px; background:var(--accent); color:white; cursor:pointer; font-weight:650;
 }
 .btn.secondary { background:white; color:var(--ink); border:1px solid var(--line); }
+.btn.danger { background:white; color:#a12f26; border:1px solid #eec6c1; }
+.btn.danger:hover { background:#fbe7e5; }
 .pills { display:flex; gap:7px; flex-wrap:wrap; }
 .pill { padding:6px 9px; border-radius:999px; background:var(--soft); color:#37533c; font-size:12px; font-weight:650; }
 .pill.warn { background:var(--warn); color:#6d5320; }
