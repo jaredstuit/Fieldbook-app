@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import SortableTable from "@/components/SortableTable";
 import { getCurrentOrganization } from "@/lib/org";
 
 export default async function GrowerPage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +20,16 @@ export default async function GrowerPage({ params }: { params: Promise<{ id: str
       <div className="card stat"><strong>{totalAcres.toFixed(1)}</strong><span>Total acres</span></div>
     </div>
     {(ranches || []).map((r:any)=><section className="card" key={r.id} style={{marginBottom:16}}><div className="section-head"><div><h3>{r.name}</h3>{r.notes?<p className="subtle">{r.notes}</p>:null}</div><div className="quick-actions"><Link className="text-link" href={`/ranches/${r.id}/edit`}>Edit ranch</Link><Link className="btn secondary" href={`/ranches/${r.id}/fields/new`}>+ Field</Link></div></div>
-      {r.fields?.length ? <table className="table"><thead><tr><th>Field</th><th>Crop</th><th>Acres</th></tr></thead><tbody>{r.fields.map((f:any)=><tr key={f.id}><td><Link href={`/fields/${f.id}`}><strong>{f.name}</strong></Link></td><td>{[f.variety,f.current_crop].filter(Boolean).join(" ") || "—"}</td><td>{f.acres ?? "—"}</td></tr>)}</tbody></table> : <p className="subtle">No fields yet.</p>}
+      {r.fields?.length ? <SortableTable
+        rows={r.fields}
+        rowKey={(f:any)=>f.id}
+        defaultSortKey="name"
+        columns={[
+          { key:"name", label:"Field", accessor:(f:any)=>f.name, render:(f:any)=><Link href={`/fields/${f.id}`}><strong>{f.name}</strong></Link> },
+          { key:"crop", label:"Crop", accessor:(f:any)=>[f.variety,f.current_crop].filter(Boolean).join(" ")||null, render:(f:any)=>[f.variety,f.current_crop].filter(Boolean).join(" ")||"—" },
+          { key:"acres", label:"Acres", accessor:(f:any)=>f.acres?Number(f.acres):null, render:(f:any)=>f.acres??"—" }
+        ]}
+      /> : <p className="subtle">No fields yet.</p>}
     </section>)}
   </AppShell>;
 }
