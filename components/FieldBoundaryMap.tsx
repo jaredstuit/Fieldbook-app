@@ -23,7 +23,7 @@ function addBoundary(draw: MapboxDraw, geometry: any) {
 function boundsFromGeometry(geometry: any): mapboxgl.LngLatBounds | null {
   try {
     const bounds = new mapboxgl.LngLatBounds();
-    const coords = geometry?.coordinates?.flat(2) || [];
+    const coords = geometry?.coordinates?.flat(1) || [];
     coords.forEach((p: any) => Array.isArray(p) && p.length >= 2 && bounds.extend([p[0], p[1]]));
     return bounds.isEmpty() ? null : bounds;
   } catch {
