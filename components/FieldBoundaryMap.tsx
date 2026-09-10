@@ -5,13 +5,56 @@ import mapboxgl from "mapbox-gl";
 import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import area from "@turf/area";
 
-type Soil = { mukey: string; symbol: string; name: string; acres: number; percent: number };
+type Soil = { mukey: string; symbol: string; name: string; acres: number; percent: number; geometry?: any | null };
 type Props = {
   fieldId: string;
   initialBoundary?: any | null;
   initialAcres?: number | null;
   initialSoils?: Soil[];
 };
+
+const SOIL_COLORS = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac", "#86bcb6", "#d37295"];
+export function soilColor(index: number) {
+  return SOIL_COLORS[index % SOIL_COLORS.length];
+}
+
+const SOIL_SOURCE_ID = "field-soils";
+const SOIL_FILL_LAYER_ID = "field-soils-fill";
+const SOIL_LINE_LAYER_ID = "field-soils-line";
+
+function soilsToFeatureCollection(soilsList: Soil[]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: soilsList
+      .filter(s => s.geometry)
+      .map((s, i) => ({
+        type: "Feature" as const,
+        properties: { mukey: s.mukey, name: s.name, symbol: s.symbol, color: soilColor(i) },
+        geometry: s.geometry
+      }))
+  };
+}
+
+function syncSoilLayer(m: mapboxgl.Map | null, soilsList: Soil[]) {
+  if (!m || !m.isStyleLoaded()) return;
+  const fc = soilsToFeatureCollection(soilsList);
+  const existing = m.getSource(SOIL_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+  if (existing) {
+    existing.setData(fc as any);
+    return;
+  }
+  if (fc.features.length === 0) return;
+  m.addSource(SOIL_SOURCE_ID, { type: "geojson", data: fc as any });
+  m.addLayer({ id: SOIL_FILL_LAYER_ID, type: "fill", source: SOIL_SOURCE_ID, paint: { "fill-color": ["get", "color"], "fill-opacity": 0.45 } });
+  m.addLayer({ id: SOIL_LINE_LAYER_ID, type: "line", source: SOIL_SOURCE_ID, paint: { "line-color": ["get", "color"], "line-width": 1.5 } });
+}
+
+function setSoilLayerVisibility(m: mapboxgl.Map | null, visible: boolean) {
+  if (!m || !m.getLayer(SOIL_FILL_LAYER_ID)) return;
+  const v = visible ? "visible" : "none";
+  m.setLayoutProperty(SOIL_FILL_LAYER_ID, "visibility", v);
+  m.setLayoutProperty(SOIL_LINE_LAYER_ID, "visibility", v);
+}
 
 function addBoundary(draw: MapboxDraw, geometry: any) {
   if (!geometry || geometry.type !== "Polygon") return false;
@@ -44,6 +87,7 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
   const [soils, setSoils] = useState<Soil[]>(initialSoils);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [showSoils, setShowSoils] = useState(true);
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
   useEffect(() => {
@@ -100,6 +144,8 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
         setPolygon(initialBoundary);
         fitToBoundary(m, initialBoundary);
       }
+      syncSoilLayer(m, initialSoils);
+      setSoilLayerVisibility(m, showSoils);
 
       // Then explicitly reload the saved geometry from Supabase through the API.
       // This avoids RSC/GeoJSON serialization differences and always reflects the database.
@@ -119,7 +165,12 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
     });
 
     return () => { m.remove(); map.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, fieldId, initialBoundary]);
+
+  useEffect(() => {
+    setSoilLayerVisibility(map.current, showSoils);
+  }, [showSoils]);
 
   async function saveBoundary() {
     if (!polygon || !acres) return;
@@ -141,8 +192,11 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
     const res = await fetch(`/api/fields/${fieldId}/soils`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ geometry: polygon }) });
     const json = await res.json();
     if (!res.ok) { setStatus(json.error || "Soil lookup failed."); return; }
-    setSoils(json.soils || []);
-    setStatus(json.soils?.length ? "USDA soil map saved to this field." : "No mapped soil polygons were returned.");
+    const newSoils: Soil[] = json.soils || [];
+    setSoils(newSoils);
+    syncSoilLayer(map.current, newSoils);
+    setSoilLayerVisibility(map.current, showSoils);
+    setStatus(newSoils.length ? "USDA soil map saved to this field." : "No mapped soil polygons were returned.");
   }
 
   if (!token) return <div className="map-config"><strong>Map ready to connect.</strong><br/><span>Add a Mapbox public access token to <code>NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN</code>.</span></div>;
@@ -150,9 +204,13 @@ export default function FieldBoundaryMap({ fieldId, initialBoundary = null, init
   return <div><div ref={node} className="real-map" />
     <div className="map-tools">
       <div><span className="label">Calculated area</span><div className="value">{acres ? `${acres.toFixed(2)} acres` : "Draw a field boundary"}</div></div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button className="btn secondary" disabled={!polygon || !dirty} onClick={saveBoundary}>Save boundary</button><button className="btn" disabled={!polygon} onClick={lookupSoils}>Save & get USDA soils</button></div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        {soils.length ? <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13}}><input type="checkbox" checked={showSoils} onChange={e=>setShowSoils(e.target.checked)} /> Show soil types</label> : null}
+        <button className="btn secondary" disabled={!polygon || !dirty} onClick={saveBoundary}>Save boundary</button>
+        <button className="btn" disabled={!polygon} onClick={lookupSoils}>Save & get USDA soils</button>
+      </div>
     </div>
     {status?<p className="subtle" style={{fontSize:13}}>{status}</p>:null}
-    {soils.length?<table className="table"><thead><tr><th>Symbol</th><th>Soil map unit</th><th>Acres</th><th>Field %</th></tr></thead><tbody>{soils.map(s=><tr key={s.mukey}><td>{s.symbol}</td><td>{s.name}</td><td>{s.acres.toFixed(2)}</td><td>{s.percent.toFixed(1)}%</td></tr>)}</tbody></table>:null}
+    {soils.length?<table className="table"><thead><tr><th></th><th>Symbol</th><th>Soil map unit</th><th>Acres</th><th>Field %</th></tr></thead><tbody>{soils.map((s,i)=><tr key={s.mukey}><td><span style={{display:"inline-block",width:12,height:12,borderRadius:3,background:soilColor(i)}}/></td><td>{s.symbol}</td><td>{s.name}</td><td>{s.acres.toFixed(2)}</td><td>{s.percent.toFixed(1)}%</td></tr>)}</tbody></table>:null}
   </div>;
 }
